@@ -1,0 +1,71 @@
+name: 友链申请
+title: "[友链]: "
+labels: ["friend-link"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 友链交换申请
+        请填写以下信息
+
+  - type: input
+    id: site_name
+    attributes:
+      label: 站点名称
+      description: 你的博客/网站的名称
+      placeholder: "例如：张三的技术笔记"
+    validations:
+      required: true
+
+  - type: input
+    id: site_url
+    attributes:
+      label: 网站 URL
+      description: 你的网站完整地址
+      placeholder: "https://example.com"
+    validations:
+      required: true
+
+  - type: input
+    id: avatar
+    attributes:
+      label: 头像链接（可选）
+      description: 你的头像或 Logo 图片地址
+      placeholder: "https://example.com/avatar.png"
+
+  - type: input
+    id: description
+    attributes:
+      label: 站点简介（可选）
+      description: 简短描述你的网站内容
+      placeholder: "分享前端技术、生活随笔"
+
+  - type: input
+    id: backlink
+    attributes:
+      label: 友链页 URL
+      description: 你的网站上放置了我站友链的页面地址（必填）
+      placeholder: "https://example.com/links"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: is_spa
+    attributes:
+      label: 是否为单页应用（SPA）
+      description: 你的网站是否是单页应用（如 Vue/React 构建）
+      options:
+        - 否
+        - 是
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已在我的网站上添加了你站的友链
+          required: true
+        - label: 我已阅读友链规则并同意遵守
+          required: true

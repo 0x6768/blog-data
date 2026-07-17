@@ -1,0 +1,31 @@
+name: 友链评论自动回复测试
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  auto-reply:
+    if: contains(github.event.issue.labels.*.name, 'friends')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: 自动回复
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 只处理真人用户的评论，忽略 bot 自己的
+            if (context.payload.comment.user.type === 'Bot') {
+              console.log('Bot 评论，跳过');
+              return;
+            }
+            
+            const commentBody = context.payload.comment.body;
+            const issueNumber = context.payload.issue.number;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `🤖 已收到你的评论：\n\n> ${commentBody}\n\n我会尽快处理，请耐心等待～`
+            });

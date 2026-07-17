@@ -1,0 +1,273 @@
+name: 友链自动处理
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  process-friend-link:
+    if: |
+      contains(github.event.issue.labels.*.name, 'review') &&
+      contains(github.event.issue.labels.*.name, 'friends')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: write
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 解析友链表单
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body;
+            
+            function parseFriendIssue(body) {
+              const data = {};
+              
+              const siteNameMatch = body.match(/### 站点名称\n\n([^\n]+)/);
+              data.site_name = siteNameMatch ? siteNameMatch[1].trim() : '';
+              
+              const siteUrlMatch = body.match(/### 网站 URL\n\n([^\n]+)/);
+              data.site_url = siteUrlMatch ? siteUrlMatch[1].trim() : '';
+              
+              const avatarMatch = body.match(/### 头像链接（可选）\n\n([^\n]+)/);
+              data.avatar = avatarMatch && avatarMatch[1].trim() !== '_No response_' ? avatarMatch[1].trim() : '';
+              
+              const descMatch = body.match(/### 站点简介（可选）\n\n([^\n]+)/);
+              data.description = descMatch && descMatch[1].trim() !== '_No response_' ? descMatch[1].trim() : '';
+              
+              const backlinkMatch = body.match(/### 友链页 URL\n\n([^\n]+)/);
+              data.backlink = backlinkMatch ? backlinkMatch[1].trim() : '';
+              
+              const spaMatch = body.match(/### 是否为单页应用（SPA）\n\n([^\n]+)/);
+              data.is_spa = spaMatch ? spaMatch[1].trim() === '是' : false;
+              
+              return data;
+            }
+            
+            const parsed = parseFriendIssue(body);
+            core.setOutput('site_name', parsed.site_name);
+            core.setOutput('site_url', parsed.site_url);
+            core.setOutput('avatar', parsed.avatar);
+            core.setOutput('description', parsed.description);
+            core.setOutput('backlink', parsed.backlink);
+            core.setOutput('is_spa', parsed.is_spa.toString());
+
+      - name: 处理 SPA 站点
+        if: steps.parse.outputs.is_spa == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.payload.issue.number;
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['manual']
+            });
+            
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              name: 'review'
+            });
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: '🌐 检测到您的站点为单页应用（SPA），需要管理员手动审核处理，请耐心等待。'
+            });
+
+      - name: 处理非 SPA 站点 - 检查友链（扫描所有参数）
+        if: steps.parse.outputs.is_spa == 'false'
+        id: check-backlink
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const backlinkUrl = '${{ steps.parse.outputs.backlink }}';
+            const siteUrl = '${{ steps.parse.outputs.site_url }}';
+            const siteName = '${{ steps.parse.outputs.site_name }}';
+            
+            const siteDomain = siteUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            
+            async function checkBacklink(url) {
+              try {
+                const response = await fetch(url, {
+                  redirect: 'manual',
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; FriendLinkChecker/1.0)'
+                  }
+                });
+                
+                let html = '';
+                let finalUrl = url;
+                
+                if (response.status >= 300 && response.status < 400) {
+                  const location = response.headers.get('location');
+                  if (location) {
+                    finalUrl = scanAllParams(location, url);
+                    
+                    const realResponse = await fetch(finalUrl, {
+                      headers: {
+                        'User-Agent': 'Mozilla/5.0 (compatible; FriendLinkChecker/1.0)'
+                      }
+                    });
+                    html = await realResponse.text();
+                  }
+                } else {
+                  html = await response.text();
+                }
+                
+                const searchTargets = [html, finalUrl];
+                const searchTerms = [
+                  siteDomain,
+                  siteName,
+                  siteUrl
+                ];
+                
+                for (const target of searchTargets) {
+                  for (const term of searchTerms) {
+                    if (target.toLowerCase().includes(term.toLowerCase())) {
+                      return { status: 'passed', message: '找到友链' };
+                    }
+                  }
+                }
+                
+                return { status: 'failed', message: '未在友链页面找到本站链接' };
+                
+              } catch (error) {
+                return { status: 'failed', message: `页面访问失败: ${error.message}` };
+              }
+            }
+            
+            function scanAllParams(location, originalUrl) {
+              try {
+                const parsed = new URL(location, originalUrl);
+                
+                for (const [key, value] of parsed.searchParams) {
+                  try {
+                    const decoded = decodeURIComponent(value);
+                    if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
+                      return decoded;
+                    }
+                  } catch {}
+                  
+                  try {
+                    const base64Decoded = Buffer.from(value, 'base64').toString('utf-8');
+                    if (base64Decoded.startsWith('http://') || base64Decoded.startsWith('https://')) {
+                      return base64Decoded;
+                    }
+                  } catch {}
+                }
+              } catch {}
+              
+              if (location.startsWith('http://') || location.startsWith('https://')) {
+                return location;
+              }
+              
+              try {
+                const originalDomain = new URL(originalUrl).origin;
+                return new URL(location, originalDomain).href;
+              } catch {
+                return location;
+              }
+            }
+            
+            const result = await checkBacklink(backlinkUrl);
+            core.setOutput('status', result.status);
+            core.setOutput('message', result.message);
+
+      - name: 友链检查失败 - 标记手动处理
+        if: steps.check-backlink.outputs.status == 'failed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.payload.issue.number;
+            const message = '${{ steps.check-backlink.outputs.message }}';
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['manual']
+            });
+            
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              name: 'review'
+            });
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `❌ 自动检查未通过：${message}\n\n请等待管理员手动处理。`
+            });
+
+      - name: 友链检查通过 - 添加到 friends.json
+        if: steps.check-backlink.outputs.status == 'passed'
+        run: |
+          if [ ! -f friends.json ]; then
+            echo '[]' > friends.json
+          fi
+          
+          python3 -c "
+import json
+
+new_entry = {
+    'name': '${{ steps.parse.outputs.site_name }}',
+    'avatar': '${{ steps.parse.outputs.avatar }}',
+    'description': '${{ steps.parse.outputs.description }}',
+    'url': '${{ steps.parse.outputs.site_url }}',
+    'backlink': '${{ steps.parse.outputs.backlink }}'
+}
+
+with open('friends.json', 'r') as f:
+    data = json.load(f)
+
+data.append(new_entry)
+
+with open('friends.json', 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+"
+          
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add friends.json
+          git commit -m '添加友链: ${{ steps.parse.outputs.site_name }}'
+          git push
+
+      - name: 友链添加成功 - 打标和评论
+        if: steps.check-backlink.outputs.status == 'passed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.payload.issue.number;
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['pass']
+            });
+            
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              name: 'review'
+            });
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: '✅ 友链已添加，请等待网站更新。'
+            });

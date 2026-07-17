@@ -3,6 +3,11 @@ on:
   issues:
     types: [opened, labeled]
 
+env:
+  MY_SITE_DOMAIN: "blog.7003410.xyz"        # 改为你的域名，例如 zhangsan.com
+  MY_SITE_NAME: "晓正杨博客"           # 改为你的站点名称
+  MY_SITE_URL: "https://blog.7003410.xyz"    # 改为你的完整网址
+
 jobs:
   process-friend-link:
     if: |
@@ -83,17 +88,14 @@ jobs:
               body: '🌐 检测到您的站点为单页应用（SPA），需要管理员手动审核处理，请耐心等待。'
             });
 
-      - name: 处理非 SPA 站点 - 检查友链（扫描所有参数）
+      - name: 处理非 SPA 站点 - 检查友链
         if: steps.parse.outputs.is_spa == 'false'
         id: check-backlink
         uses: actions/github-script@v7
         with:
           script: |
             const backlinkUrl = '${{ steps.parse.outputs.backlink }}';
-            const siteUrl = '${{ steps.parse.outputs.site_url }}';
-            const siteName = '${{ steps.parse.outputs.site_name }}';
-            
-            const siteDomain = siteUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const mySiteDomain = process.env.MY_SITE_DOMAIN;
             
             async function checkBacklink(url) {
               try {
@@ -110,7 +112,7 @@ jobs:
                 if (response.status >= 300 && response.status < 400) {
                   const location = response.headers.get('location');
                   if (location) {
-                    finalUrl = scanAllParams(location, url);
+                    finalUrl = location;
                     
                     const realResponse = await fetch(finalUrl, {
                       headers: {
@@ -123,18 +125,16 @@ jobs:
                   html = await response.text();
                 }
                 
-                const searchTargets = [html, finalUrl];
-                const searchTerms = [
-                  siteDomain,
-                  siteName,
-                  siteUrl
-                ];
+                // 第一步：直接在页面内容中搜索裸域名
+                if (html.toLowerCase().includes(mySiteDomain.toLowerCase())) {
+                  return { status: 'passed', message: '找到友链' };
+                }
                 
-                for (const target of searchTargets) {
-                  for (const term of searchTerms) {
-                    if (target.toLowerCase().includes(term.toLowerCase())) {
-                      return { status: 'passed', message: '找到友链' };
-                    }
+                // 第二步：如果没找到，扫描所有参数值
+                const allParamValues = extractAllParamValues(finalUrl);
+                for (const paramValue of allParamValues) {
+                  if (paramValue.toLowerCase().includes(mySiteDomain.toLowerCase())) {
+                    return { status: 'passed', message: '找到友链（参数中）' };
                   }
                 }
                 
@@ -145,37 +145,32 @@ jobs:
               }
             }
             
-            function scanAllParams(location, originalUrl) {
+            // 提取 URL 中所有参数的值（包括嵌套在参数中的 URL）
+            function extractAllParamValues(url) {
+              const values = [];
+              
               try {
-                const parsed = new URL(location, originalUrl);
+                const parsed = new URL(url);
                 
                 for (const [key, value] of parsed.searchParams) {
+                  // 原始值
+                  values.push(value);
+                  
+                  // URL 解码后的值
                   try {
                     const decoded = decodeURIComponent(value);
-                    if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
-                      return decoded;
-                    }
+                    values.push(decoded);
                   } catch {}
                   
+                  // Base64 解码后的值
                   try {
                     const base64Decoded = Buffer.from(value, 'base64').toString('utf-8');
-                    if (base64Decoded.startsWith('http://') || base64Decoded.startsWith('https://')) {
-                      return base64Decoded;
-                    }
+                    values.push(base64Decoded);
                   } catch {}
                 }
               } catch {}
               
-              if (location.startsWith('http://') || location.startsWith('https://')) {
-                return location;
-              }
-              
-              try {
-                const originalDomain = new URL(originalUrl).origin;
-                return new URL(location, originalDomain).href;
-              } catch {
-                return location;
-              }
+              return values;
             }
             
             const result = await checkBacklink(backlinkUrl);

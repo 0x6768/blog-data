@@ -11,7 +11,7 @@ jobs:
       issues: write
       contents: write
     steps:
-      - name: 自动回复
+      - name: 处理管理员指令
         uses: actions/github-script@v7
         with:
           script: |
@@ -29,8 +29,14 @@ jobs:
             console.log(`💬 收到评论 from @${commenter}: "${commentBody}"`);
             console.log(`🏠 仓库 Owner: ${repoOwner}`);
             
-            // 检查是否是仓库 Owner 发送的 "批准" 命令
-            if (commenter === repoOwner && commentBody.trim() === '批准') {
+            // 只有仓库 Owner 才能执行操作
+            if (commenter !== repoOwner) {
+              console.log('👤 非管理员评论，忽略');
+              return;
+            }
+            
+            // 处理 "批准" 命令
+            if (commentBody.trim() === '批准') {
               console.log('🔑 管理员批准，开始处理友链...');
               
               // 获取 Issue body 解析友链信息
@@ -64,7 +70,6 @@ jobs:
               const fs = require('fs');
               const path = require('path');
               
-              // 需要先 checkout 仓库，这里用 github API 获取文件
               const { data: fileData } = await github.rest.repos.getContent({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -133,12 +138,47 @@ jobs:
               return;
             }
             
-            // 普通用户的评论，自动回复
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: `🤖 已收到你的评论：\n\n> ${commentBody}\n\n我会尽快处理，请耐心等待～`
-            });
+            // 处理 "拒绝" 命令
+            if (commentBody.trim() === '拒绝') {
+              console.log('❌ 管理员拒绝，开始处理...');
+              
+              // 打上拒绝标签
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['rejected']
+              });
+              
+              // 移除 manual 标签
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: 'manual'
+                });
+              } catch (error) {
+                console.log('⚠️ manual 标签不存在，跳过移除');
+              }
+              
+              // 回复并关闭
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: '❌ 管理员已拒绝此友链申请，Issue 已关闭。'
+              });
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed'
+              });
+              
+              console.log('🔒 Issue 已关闭并标记为 rejected');
+              return;
+            }
             
-            console.log('✅ 自动回复已发送');
+            console.log('ℹ️ 非有效指令，忽略');

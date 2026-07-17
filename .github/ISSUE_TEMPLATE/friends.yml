@@ -55,7 +55,7 @@ body:
     id: is_spa
     attributes:
       label: 是否为单页应用（SPA）
-      description: 你的网站是否是单页应用（如 Vue/React 构建）
+      description: 你的网站是否是单页应用（如 Vue/React 构建）注意：如果您的网站使用了fetch来获取友情链接或者人机认证防护，那么您也应该勾选此项。
       options:
         - 否
         - 是

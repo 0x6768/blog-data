@@ -1,7 +1,11 @@
 name: 友链自动处理
 on:
   issues:
-    types: [opened, labeled]
+    types: [opened]
+
+concurrency:
+  group: friend-link-${{ github.event.issue.number }}
+  cancel-in-progress: true
 
 env:
   MY_SITE_DOMAIN: "blog.7003410.xyz"

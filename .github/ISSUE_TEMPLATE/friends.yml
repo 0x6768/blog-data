@@ -1,7 +1,8 @@
 name: 友链申请
 description: "友链就要用这个!"
-title: "[友链]: "
-labels: ["friend-link"]
+
+
+labels: ["review", "friends"]   
 body:
   - type: markdown
     attributes:

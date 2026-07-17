@@ -22,8 +22,19 @@ jobs:
       issues: write
       contents: write
     steps:
+      - name: 🚀 开始处理友链
+        run: |
+          echo "=========================================="
+          echo "🎯 开始处理 Issue #${{ github.event.issue.number }}"
+          echo "📝 Issue 标题: ${{ github.event.issue.title }}"
+          echo "🏷️  当前标签: ${{ join(github.event.issue.labels.*.name, ', ') }}"
+          echo "👤 提交者: ${{ github.event.issue.user.login }}"
+          echo "=========================================="
+
       - name: 检出仓库
         uses: actions/checkout@v4
+        run: |
+          echo "📂 已检出仓库，当前分支: $(git branch --show-current)"
 
       - name: 解析友链表单
         id: parse
@@ -32,65 +43,120 @@ jobs:
           script: |
             const body = context.payload.issue.body;
             
+            console.log("📄 Issue Body 原始内容:");
+            console.log("----------------------------------------");
+            console.log(body);
+            console.log("----------------------------------------");
+            
             function parseFriendIssue(body) {
               const data = {};
               
               const siteNameMatch = body.match(/### 站点名称\n\n([^\n]+)/);
               data.site_name = siteNameMatch ? siteNameMatch[1].trim() : '';
+              console.log(`🔍 解析站点名称: "${data.site_name}" (匹配结果: ${siteNameMatch ? '成功' : '失败'})`);
               
               const siteUrlMatch = body.match(/### 网站 URL\n\n([^\n]+)/);
               data.site_url = siteUrlMatch ? siteUrlMatch[1].trim() : '';
+              console.log(`🔍 解析网站 URL: "${data.site_url}" (匹配结果: ${siteUrlMatch ? '成功' : '失败'})`);
               
               const avatarMatch = body.match(/### 头像链接（可选）\n\n([^\n]+)/);
               data.avatar = avatarMatch && avatarMatch[1].trim() !== '_No response_' ? avatarMatch[1].trim() : '';
+              console.log(`🔍 解析头像链接: "${data.avatar || '(未提供)'}" (匹配结果: ${avatarMatch ? '成功' : '失败'})`);
               
               const descMatch = body.match(/### 站点简介（可选）\n\n([^\n]+)/);
               data.description = descMatch && descMatch[1].trim() !== '_No response_' ? descMatch[1].trim() : '';
+              console.log(`🔍 解析站点简介: "${data.description || '(未提供)'}" (匹配结果: ${descMatch ? '成功' : '失败'})`);
               
               const backlinkMatch = body.match(/### 友链页 URL\n\n([^\n]+)/);
               data.backlink = backlinkMatch ? backlinkMatch[1].trim() : '';
+              console.log(`🔍 解析友链页 URL: "${data.backlink}" (匹配结果: ${backlinkMatch ? '成功' : '失败'})`);
               
               const spaMatch = body.match(/### 是否为单页应用（SPA）\n\n([^\n]+)/);
               data.is_spa = spaMatch ? spaMatch[1].trim() === '是' : false;
+              console.log(`🔍 解析 SPA 状态: "${spaMatch ? spaMatch[1].trim() : '未匹配'}" → is_spa = ${data.is_spa}`);
               
               return data;
             }
             
             const parsed = parseFriendIssue(body);
+            
+            console.log("\n📋 解析完成，输出结果:");
+            console.log(`   site_name: "${parsed.site_name}"`);
+            console.log(`   site_url: "${parsed.site_url}"`);
+            console.log(`   avatar: "${parsed.avatar || '(空)'}"`);
+            console.log(`   description: "${parsed.description || '(空)'}"`);
+            console.log(`   backlink: "${parsed.backlink}"`);
+            console.log(`   is_spa: ${parsed.is_spa}`);
+            
             core.setOutput('site_name', parsed.site_name);
             core.setOutput('site_url', parsed.site_url);
             core.setOutput('avatar', parsed.avatar);
             core.setOutput('description', parsed.description);
             core.setOutput('backlink', parsed.backlink);
             core.setOutput('is_spa', parsed.is_spa.toString());
+            
+            console.log("\n✅ 解析步骤完成");
+
+      - name: 📊 打印解析结果摘要
+        run: |
+          echo "=========================================="
+          echo "📊 解析结果摘要"
+          echo "=========================================="
+          echo "站点名称: ${{ steps.parse.outputs.site_name }}"
+          echo "网站 URL: ${{ steps.parse.outputs.site_url }}"
+          echo "头像链接: ${{ steps.parse.outputs.avatar || '(未提供)' }}"
+          echo "站点简介: ${{ steps.parse.outputs.description || '(未提供)' }}"
+          echo "友链页 URL: ${{ steps.parse.outputs.backlink }}"
+          echo "是否为 SPA: ${{ steps.parse.outputs.is_spa }}"
+          echo "=========================================="
 
       - name: 处理 SPA 站点
+        if: steps.parse.outputs.is_spa == 'true'
+        run: echo "🌐 检测到 SPA 站点，进入 SPA 处理分支"
+        
+      - name: 处理 SPA 站点 - 打标和评论
         if: steps.parse.outputs.is_spa == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const issueNumber = context.payload.issue.number;
             
+            console.log(`🌐 开始处理 SPA 站点，Issue #${issueNumber}`);
+            
+            console.log("📝 添加 manual 标签...");
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               labels: ['manual']
             });
+            console.log("✅ manual 标签添加成功");
             
+            console.log("🗑️ 移除 review 标签...");
             await github.rest.issues.removeLabel({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               name: 'review'
             });
+            console.log("✅ review 标签移除成功");
             
+            console.log("💬 添加评论通知用户...");
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               body: '🌐 检测到您的站点为单页应用（SPA），需要管理员手动审核处理，请耐心等待。'
             });
+            console.log("✅ 评论添加成功");
+            
+            console.log("✅ SPA 站点处理完成");
+
+      - name: 处理非 SPA 站点
+        if: steps.parse.outputs.is_spa == 'false'
+        run: |
+          echo "🌐 检测到非 SPA 站点，开始友链检查流程"
+          echo "🔗 目标友链页: ${{ steps.parse.outputs.backlink }}"
 
       - name: 处理非 SPA 站点 - 检查友链
         if: steps.parse.outputs.is_spa == 'false'
@@ -101,7 +167,17 @@ jobs:
             const backlinkUrl = '${{ steps.parse.outputs.backlink }}';
             const mySiteDomain = process.env.MY_SITE_DOMAIN;
             
+            console.log("==========================================");
+            console.log("🔍 开始检查友链");
+            console.log("==========================================");
+            console.log(`📎 待检查的友链页 URL: "${backlinkUrl}"`);
+            console.log(`🔎 要查找的域名: "${mySiteDomain}"`);
+            console.log("");
+            
             async function checkBacklink(url) {
+              console.log(`🌐 正在请求 URL: ${url}`);
+              console.log(`📋 请求头: User-Agent=Mozilla/5.0 (compatible; FriendLinkChecker/1.0)`);
+              
               try {
                 const response = await fetch(url, {
                   redirect: 'manual',
@@ -110,13 +186,19 @@ jobs:
                   }
                 });
                 
+                console.log(`📡 HTTP 响应状态码: ${response.status} ${response.statusText}`);
+                console.log(`📍 响应 URL: ${response.url}`);
+                
                 let html = '';
                 let finalUrl = url;
                 
                 if (response.status >= 300 && response.status < 400) {
                   const location = response.headers.get('location');
+                  console.log(`🔄 检测到重定向，目标位置: ${location}`);
+                  
                   if (location) {
                     finalUrl = location;
+                    console.log(`🌐 跟随重定向到: ${finalUrl}`);
                     
                     const realResponse = await fetch(finalUrl, {
                       headers: {
@@ -124,58 +206,125 @@ jobs:
                       }
                     });
                     html = await realResponse.text();
+                    console.log(`📡 重定向后状态码: ${realResponse.status}`);
+                    console.log(`📏 页面大小: ${html.length} 字符`);
                   }
                 } else {
                   html = await response.text();
+                  console.log(`📏 页面大小: ${html.length} 字符`);
                 }
                 
                 // 第一步：直接在页面内容中搜索裸域名
-                if (html.toLowerCase().includes(mySiteDomain.toLowerCase())) {
+                console.log(`\n🔎 第一步：搜索裸域名 "${mySiteDomain}"`);
+                const foundInHtml = html.toLowerCase().includes(mySiteDomain.toLowerCase());
+                console.log(`   ${foundInHtml ? '✅ 找到匹配!' : '❌ 未找到匹配'}`);
+                
+                if (foundInHtml) {
+                  // 找一下具体出现在哪里
+                  const index = html.toLowerCase().indexOf(mySiteDomain.toLowerCase());
+                  const snippetStart = Math.max(0, index - 50);
+                  const snippetEnd = Math.min(html.length, index + mySiteDomain.length + 100);
+                  console.log(`   📍 出现位置索引: ${index}`);
+                  console.log(`   📄 上下文片段: ...${html.substring(snippetStart, snippetEnd)}...`);
+                  
                   return { status: 'passed', message: '找到友链' };
                 }
                 
                 // 第二步：如果没找到，扫描所有参数值
+                console.log(`\n🔎 第二步：扫描 URL 参数值`);
                 const allParamValues = extractAllParamValues(finalUrl);
-                for (const paramValue of allParamValues) {
-                  if (paramValue.toLowerCase().includes(mySiteDomain.toLowerCase())) {
+                console.log(`   提取到 ${allParamValues.length} 个参数值`);
+                
+                for (let i = 0; i < allParamValues.length; i++) {
+                  const val = allParamValues[i];
+                  console.log(`   [${i}] 参数值: "${val.substring(0, 100)}${val.length > 100 ? '...' : ''}"`);
+                  
+                  if (val.toLowerCase().includes(mySiteDomain.toLowerCase())) {
+                    console.log(`   ✅ 参数值中找到匹配!`);
                     return { status: 'passed', message: '找到友链（参数中）' };
                   }
                 }
                 
+                console.log(`\n❌ 所有检查均未找到友链`);
                 return { status: 'failed', message: '未在友链页面找到本站链接' };
                 
               } catch (error) {
+                console.error(`\n❌ 页面访问失败: ${error.message}`);
+                console.error(`   Error stack: ${error.stack}`);
                 return { status: 'failed', message: `页面访问失败: ${error.message}` };
               }
             }
             
             function extractAllParamValues(url) {
               const values = [];
+              console.log(`\n🔧 开始提取 URL 参数值`);
               
               try {
                 const parsed = new URL(url);
+                console.log(`   URL 解析成功: host=${parsed.host}, pathname=${parsed.pathname}`);
+                console.log(`   参数数量: ${parsed.searchParams.size}`);
                 
                 for (const [key, value] of parsed.searchParams) {
+                  console.log(`   📌 参数: ${key}=${value.substring(0, 80)}${value.length > 80 ? '...' : ''}`);
                   values.push(value);
                   
                   try {
                     const decoded = decodeURIComponent(value);
-                    values.push(decoded);
-                  } catch {}
+                    if (decoded !== value) {
+                      console.log(`      URI解码后: ${decoded.substring(0, 80)}${decoded.length > 80 ? '...' : ''}`);
+                      values.push(decoded);
+                    }
+                  } catch {
+                    console.log(`      ⚠️ URI解码失败`);
+                  }
                   
                   try {
                     const base64Decoded = Buffer.from(value, 'base64').toString('utf-8');
-                    values.push(base64Decoded);
-                  } catch {}
+                    if (base64Decoded && !base64Decoded.includes('�')) {
+                      console.log(`      Base64解码后: ${base64Decoded.substring(0, 60)}${base64Decoded.length > 60 ? '...' : ''}`);
+                      values.push(base64Decoded);
+                    }
+                  } catch {
+                    console.log(`      ⚠️ Base64解码失败`);
+                  }
                 }
-              } catch {}
+              } catch (e) {
+                console.log(`   ❌ URL 解析失败: ${e.message}`);
+              }
               
+              console.log(`   共提取到 ${values.length} 个有效参数值`);
               return values;
             }
             
+            console.log("\n⏳ 开始执行友链检查...");
             const result = await checkBacklink(backlinkUrl);
+            
+            console.log("\n==========================================");
+            console.log(`📊 友链检查结果`);
+            console.log(`   状态: ${result.status}`);
+            console.log(`   消息: ${result.message}`);
+            console.log("==========================================");
+            
             core.setOutput('status', result.status);
             core.setOutput('message', result.message);
+            
+            console.log("\n✅ 友链检查步骤完成");
+
+      - name: 📊 打印友链检查结果摘要
+        run: |
+          echo "=========================================="
+          echo "📊 友链检查结果摘要"
+          echo "=========================================="
+          echo "检查状态: ${{ steps.check-backlink.outputs.status }}"
+          echo "检查消息: ${{ steps.check-backlink.outputs.message }}"
+          echo "=========================================="
+
+      - name: 友链检查失败 - 标记手动处理
+        if: steps.check-backlink.outputs.status == 'failed'
+        run: |
+          echo "❌ 友链检查失败"
+          echo "原因: ${{ steps.check-backlink.outputs.message }}"
+          echo "即将标记为 manual 并移除 review 标签"
 
       - name: 友链检查失败 - 标记手动处理
         if: steps.check-backlink.outputs.status == 'failed'
@@ -185,26 +334,43 @@ jobs:
             const issueNumber = context.payload.issue.number;
             const message = '${{ steps.check-backlink.outputs.message }}';
             
+            console.log(`❌ 友链检查失败，Issue #${issueNumber}`);
+            console.log(`原因: ${message}`);
+            
+            console.log("📝 添加 manual 标签...");
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               labels: ['manual']
             });
+            console.log("✅ manual 标签添加成功");
             
+            console.log("🗑️ 移除 review 标签...");
             await github.rest.issues.removeLabel({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               name: 'review'
             });
+            console.log("✅ review 标签移除成功");
             
+            console.log("💬 添加评论通知用户...");
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               body: `❌ 自动检查未通过：${message}\n\n请等待管理员手动处理。`
             });
+            console.log("✅ 评论添加成功");
+            
+            console.log("✅ 失败处理完成");
+
+      - name: 友链检查通过 - 添加到 friends.json
+        if: steps.check-backlink.outputs.status == 'passed'
+        run: |
+          echo "✅ 友链检查通过"
+          echo "即将将友链添加到 friends.json"
 
       - name: 友链检查通过 - 添加到 friends.json
         if: steps.check-backlink.outputs.status == 'passed'
@@ -216,9 +382,16 @@ jobs:
             
             const friendsPath = path.join(process.env.GITHUB_WORKSPACE, 'friends.json');
             
+            console.log(`📂 friends.json 路径: ${friendsPath}`);
+            
             let friends = [];
             if (fs.existsSync(friendsPath)) {
-              friends = JSON.parse(fs.readFileSync(friendsPath, 'utf-8'));
+              const content = fs.readFileSync(friendsPath, 'utf-8');
+              friends = JSON.parse(content);
+              console.log(`📖 读取现有 friends.json，当前有 ${friends.length} 条友链`);
+              console.log(`   现有友链: ${friends.map(f => f.name).join(', ')}`);
+            } else {
+              console.log("📄 friends.json 不存在，将创建新文件");
             }
             
             const newEntry = {
@@ -229,20 +402,59 @@ jobs:
               backlink: '${{ steps.parse.outputs.backlink }}'
             };
             
-            friends.push(newEntry);
+            console.log(`\n➕ 准备添加新友链:`);
+            console.log(`   名称: ${newEntry.name}`);
+            console.log(`   URL: ${newEntry.url}`);
+            console.log(`   头像: ${newEntry.avatar || '(无)'}`);
+            console.log(`   描述: ${newEntry.description || '(无)'}`);
+            console.log(`   友链页: ${newEntry.backlink}`);
+            
+            // 检查是否已存在
+            const exists = friends.some(f => f.url === newEntry.url || f.name === newEntry.name);
+            if (exists) {
+              console.log(`⚠️ 警告: 友链 ${newEntry.name} (${newEntry.url}) 已存在，跳过添加`);
+              console.log(`   现有匹配项: ${JSON.stringify(friends.filter(f => f.url === newEntry.url || f.name === newEntry.name), null, 2)}`);
+            } else {
+              friends.push(newEntry);
+              console.log(`✅ 友链已添加到数组`);
+            }
             
             fs.writeFileSync(friendsPath, JSON.stringify(friends, null, 2), 'utf-8');
-            
-            console.log(`已添加友链: ${newEntry.name}`);
+            console.log(`💾 已保存 friends.json，当前共 ${friends.length} 条友链`);
+            console.log(`\n📋 所有友链列表:`);
+            friends.forEach((f, i) => {
+              console.log(`   [${i+1}] ${f.name} - ${f.url}`);
+            });
 
       - name: 提交并推送 friends.json
         if: steps.check-backlink.outputs.status == 'passed'
         run: |
+          echo "📤 准备提交 friends.json..."
+          
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          echo "📋 Git 状态:"
+          git status
+          
+          echo "\n📄 查看 friends.json 差异:"
+          git diff friends.json || echo "无差异"
+          
           git add friends.json
+          echo "✅ 已暂存 friends.json"
+          
           git commit -m '添加友链: ${{ steps.parse.outputs.site_name }}'
+          echo "✅ 已提交"
+          
+          echo "⏫ 正在推送到远程..."
           git push
+          echo "✅ 推送成功"
+
+      - name: 友链添加成功 - 打标和评论
+        if: steps.check-backlink.outputs.status == 'passed'
+        run: |
+          echo "🏷️ 即将添加 pass 标签并移除 review 标签"
+          echo "💬 即将添加成功评论"
 
       - name: 友链添加成功 - 打标和评论
         if: steps.check-backlink.outputs.status == 'passed'
@@ -251,23 +463,42 @@ jobs:
           script: |
             const issueNumber = context.payload.issue.number;
             
+            console.log(`✅ 友链添加成功，处理 Issue #${issueNumber}`);
+            
+            console.log("📝 添加 pass 标签...");
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               labels: ['pass']
             });
+            console.log("✅ pass 标签添加成功");
             
+            console.log("🗑️ 移除 review 标签...");
             await github.rest.issues.removeLabel({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               name: 'review'
             });
+            console.log("✅ review 标签移除成功");
             
+            console.log("💬 添加成功评论...");
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               body: '✅ 友链已添加，请等待网站更新。'
             });
+            console.log("✅ 评论添加成功");
+            
+            console.log("\n🎉 整个友链处理流程完成!");
+
+      - name: 🏁 流程结束
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "🏁 友链处理流程结束"
+          echo "📝 Issue #${{ github.event.issue.number }}"
+          echo "⏱️  完成时间: $(date)"
+          echo "=========================================="

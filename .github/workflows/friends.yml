@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-      contents: write
+      contents: read
     steps:
       - name: 🚀 开始处理友链
         run: |
@@ -29,13 +29,109 @@ jobs:
           echo "📝 Issue 标题: ${{ github.event.issue.title }}"
           echo "🏷️  当前标签: ${{ join(github.event.issue.labels.*.name, ', ') }}"
           echo "👤 提交者: ${{ github.event.issue.user.login }}"
+          echo "🆔 提交者 ID: ${{ github.event.issue.user.id }}"
           echo "=========================================="
 
+      # ============================================================
+      # 🛡️ 黑名单检测（最高优先级，放在最前面）
+      # ============================================================
       - name: 检出仓库
+        if: always()
         uses: actions/checkout@v4
 
+      - name: 🛡️ 黑名单检测
+        id: check-blacklist
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const submitterId = context.payload.issue.user.id;
+            const submitterLogin = context.payload.issue.user.login;
+            const blacklistPath = path.join(process.env.GITHUB_WORKSPACE, 'black.list');
+
+            console.log("==========================================");
+            console.log("🛡️ 黑名单检测");
+            console.log(`🆔 提交者 ID: ${submitterId}`);
+            console.log(`👤 提交者 Login: ${submitterLogin}`);
+            console.log(`📂 黑名单文件路径: ${blacklistPath}`);
+
+            // 文件不存在 → 跳过检测
+            if (!fs.existsSync(blacklistPath)) {
+              console.log("📄 black.list 文件不存在，跳过黑名单检测");
+              console.log("==========================================");
+              core.setOutput('blacklisted', 'false');
+              return;
+            }
+
+            // 读取黑名单
+            const content = fs.readFileSync(blacklistPath, 'utf-8');
+            const blacklist = content
+              .split('\n')
+              .map(line => line.trim())
+              .filter(line => line.length > 0 && !line.startsWith('#'));
+
+            console.log(`📋 黑名单中共 ${blacklist.length} 条记录:`);
+            blacklist.forEach(id => console.log(`   - ${id}`));
+
+            // 检查是否命中
+            const isBlacklisted = blacklist.includes(String(submitterId));
+
+            console.log(`\n🔎 检测结果: ${isBlacklisted ? '❌ 命中黑名单' : '✅ 未命中'}`);
+            console.log("==========================================");
+
+            core.setOutput('blacklisted', isBlacklisted.toString());
+
+      - name: ❌ 黑名单命中 - 自动拒绝
+        if: steps.check-blacklist.outputs.blacklisted == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.payload.issue.number;
+            const submitterId = context.payload.issue.user.id;
+            const submitterLogin = context.payload.issue.user.login;
+
+            console.log(`🛡️ 黑名单命中，拒绝 Issue #${issueNumber}`);
+            console.log(`   提交者: ${submitterLogin} (ID: ${submitterId})`);
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['rejected']
+            });
+
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              name: 'review'
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `🛡️ **自动拒绝**：用户 \`${submitterLogin}\` (ID: \`${submitterId}\`) 在黑名单中，无法申请友链。`
+            });
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed'
+            });
+
+            console.log("🔒 Issue 已关闭并打上 rejected 标签");
+
+      # ============================================================
+      # 以下为正常流程（黑名单未命中才执行）
+      # ============================================================
       - name: 解析友链表单
         id: parse
+        if: steps.check-blacklist.outputs.blacklisted == 'false'
         uses: actions/github-script@v7
         with:
           script: |
@@ -95,6 +191,7 @@ jobs:
 
       - name: 🔍 检查域名是否已存在
         id: check-duplicate
+        if: steps.check-blacklist.outputs.blacklisted == 'false'
         uses: actions/github-script@v7
         with:
           script: |
@@ -150,7 +247,7 @@ jobs:
             }
 
       - name: ❌ 域名重复 - 自动拒绝
-        if: steps.check-duplicate.outputs.duplicate == 'true'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -195,7 +292,7 @@ jobs:
             console.log("🔒 Issue 已关闭并打上 rejected 标签");
 
       - name: 处理 SPA 站点
-        if: steps.check-duplicate.outputs.duplicate == 'false' && steps.parse.outputs.is_spa == 'true'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'false' && steps.parse.outputs.is_spa == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -228,7 +325,7 @@ jobs:
             console.log("✅ 评论已添加");
 
       - name: 处理非 SPA 站点 - 检查友链
-        if: steps.check-duplicate.outputs.duplicate == 'false' && steps.parse.outputs.is_spa == 'false'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'false' && steps.parse.outputs.is_spa == 'false'
         id: check-backlink
         uses: actions/github-script@v7
         with:
@@ -341,7 +438,7 @@ jobs:
             core.setOutput('message', result.message);
 
       - name: 友链检查失败 - 标记手动处理
-        if: steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'failed'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'failed'
         uses: actions/github-script@v7
         with:
           script: |
@@ -374,7 +471,7 @@ jobs:
             console.log("✅ 已标记 manual，等待人工处理");
 
       - name: 友链检查通过 - 添加到 friends.json
-        if: steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'passed'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'passed'
         uses: actions/github-script@v7
         with:
           script: |
@@ -409,7 +506,7 @@ jobs:
             console.log(`💾 已保存，共 ${friends.length} 条友链`);
 
       - name: 提交并推送 friends.json
-        if: steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'passed'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'passed'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
@@ -419,7 +516,7 @@ jobs:
           echo "✅ 已推送到远程"
 
       - name: 友链添加成功 - 打标、评论并关闭
-        if: steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'passed'
+        if: steps.check-blacklist.outputs.blacklisted == 'false' && steps.check-duplicate.outputs.duplicate == 'false' && steps.check-backlink.outputs.status == 'passed'
         uses: actions/github-script@v7
         with:
           script: |
@@ -456,4 +553,4 @@ jobs:
             });
             
             console.log("🔒 Issue 已关闭");
-            console.log("🎉 处理完成");
+            console.log("🎉 处理完成")

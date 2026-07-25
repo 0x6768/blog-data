@@ -11,6 +11,9 @@ jobs:
       issues: write
       contents: write
     steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
       - name: 处理管理员指令
         uses: actions/github-script@v7
         with:
@@ -168,6 +171,101 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: issueNumber,
                 body: '❌ 管理员已拒绝此友链申请，Issue 已关闭。'
+              });
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed'
+              });
+              
+              console.log('🔒 Issue 已关闭并标记为 rejected');
+              return;
+            }
+            
+            // 处理 "屏蔽" 命令
+            if (commentBody.trim() === '屏蔽') {
+              console.log('🛡️ 管理员执行屏蔽操作...');
+              
+              // 获取 Issue 提交者的用户 ID
+              const targetUserId = context.payload.issue.user.id;
+              const targetUserName = context.payload.issue.user.login;
+              
+              console.log(`🎯 目标用户: @${targetUserName} (ID: ${targetUserId})`);
+              
+              // 读取或创建 black.list
+              const fs = require('fs');
+              const path = require('path');
+              
+              const blacklistPath = path.join(process.env.GITHUB_WORKSPACE, 'black.list');
+              let blackListContent = '';
+              let needCreate = false;
+              
+              if (fs.existsSync(blacklistPath)) {
+                blackListContent = fs.readFileSync(blacklistPath, 'utf-8');
+                console.log('📖 已读取现有 black.list');
+              } else {
+                console.log('📄 black.list 不存在，将新建');
+                needCreate = true;
+              }
+              
+              // 检查是否已在黑名单中
+              const lines = blackListContent ? blackListContent.split('\n').map(l => l.trim()) : [];
+              if (lines.includes(String(targetUserId))) {
+                console.log('⚠️ 该用户已在黑名单中');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: `⚠️ 用户 @${targetUserName} (ID: \`${targetUserId}\`) 已在黑名单中，无需重复添加。`
+                });
+                return;
+              }
+              
+              // 追加用户 ID
+              const newLine = `${blackListContent.endsWith('\n') || blackListContent === '' ? '' : '\n'}${targetUserId}`;
+              const updatedContent = blackListContent + newLine;
+              
+              // 写入文件
+              fs.writeFileSync(blacklistPath, updatedContent, 'utf-8');
+              console.log('✅ black.list 已更新');
+              
+              // 提交并推送 black.list
+              const { execSync } = require('child_process');
+              execSync('git config user.name "github-actions[bot]"', { cwd: process.env.GITHUB_WORKSPACE });
+              execSync('git config user.email "github-actions[bot]@users.noreply.github.com"', { cwd: process.env.GITHUB_WORKSPACE });
+              execSync('git add black.list', { cwd: process.env.GITHUB_WORKSPACE });
+              execSync(`git commit -m "屏蔽用户 @${targetUserName} (ID: ${targetUserId})"`, { cwd: process.env.GITHUB_WORKSPACE });
+              execSync('git push', { cwd: process.env.GITHUB_WORKSPACE });
+              console.log('✅ black.list 已推送到远程');
+              
+              // 打 rejected 标签
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['rejected']
+              });
+              
+              // 移除 manual 标签
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: 'manual'
+                });
+              } catch (error) {
+                console.log('⚠️ manual 标签不存在，跳过移除');
+              }
+              
+              // 回复并关闭
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `🛡️ 已屏蔽用户 @${targetUserName} (ID: \`${targetUserId}\`)，该用户今后提交的友链申请将被自动拒绝。\n\n❌ Issue 已关闭。`
               });
               
               await github.rest.issues.update({

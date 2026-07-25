@@ -1,8 +1,7 @@
 name: 友链申请
 description: "友链就要用这个!"
 
-
-labels: ["review", "friends"]   
+labels: ["review", "friends"]
 body:
   - type: markdown
     attributes:
@@ -27,6 +26,7 @@ body:
       placeholder: "https://example.com"
     validations:
       required: true
+      pattern: ^https?://
 
   - type: input
     id: avatar
@@ -50,12 +50,13 @@ body:
       placeholder: "https://example.com/links"
     validations:
       required: true
+      pattern: ^https?://
 
   - type: dropdown
     id: is_spa
     attributes:
       label: 是否为单页应用（SPA）
-      description: 你的网站是否是单页应用（如 Vue/React 构建）注意：如果您的网站使用了fetch来获取友情链接或者人机认证防护，那么您也应该勾选此项。
+      description: 注意：如果您的网站使用 JavaScript 动态加载友情链接（如 Vue/React 构建）、或有人机验证（Cloudflare、reCAPTCHA 等），自动检测将无法抓取到友链，请勾选此项以便人工审核。
       options:
         - 否
         - 是

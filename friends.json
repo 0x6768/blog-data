@@ -1,16 +1,21 @@
 [
-  {
-    "name": "Onlyfork Blog",
-    "avatar": "",
-    "description": "",
-    "url": "https://blog.0y.hk",
-    "backlink": "https://blog.0y.hk/friends/"
-  },
-  {
-    "name": "tianhw blog",
-    "avatar": "",
-    "description": "",
-    "url": "https://blog.tianhw.top",
-    "backlink": "https://blog.tianhw.top/friends/"
-  }
+	{
+		"name": "Cloudflare",
+		"url": "https://www.cloudflare.com",
+		"avatar": "https://qualified-production.s3.amazonaws.com/uploads/3b522ef84c409e4457032e4b4e3b984abbc92522c6f100f4ccc55c0ccfd3062b.png",
+		
+		"description": "Cloudflare永不为奴"
+	},
+	{
+		"name": "THW’s Blog",
+		"url": "https://tianhw.top", 
+		"avatar": "https://image.tianhw.top/avatar.webp",
+		"description": "前途似海，来日方长"
+	},
+	{
+		"name": "Onlyfork Blog",
+		"url": "https://blog.2fo.cc/",
+		"avatar": "https://blog.2fo.cc/111.jpg",
+		"description": "欢迎光临喵喵喵~"
+	}
 ]
